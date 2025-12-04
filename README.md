@@ -2,9 +2,6 @@
 
 ## 📚 Table of Contents
 
--   [🚀 QEMU PCIe Device Development
-    Repository](#-qemu-pcie-device-development-repository)
--   [📚 Table of Contents](#-table-of-contents)
 -   [📁 Repository Structure](#-repository-structure)
 -   [🧰 Features Covered](#-features-covered)
 -   [⚙️ What Happens When You Run
@@ -110,6 +107,14 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 
 ``` bash
 00:05.0 Ethernet controller: Device 1234:11e8
+        Subsystem: Red Hat, Inc. Device 1100
+        Flags: fast devsel
+
+00:05.0 Ethernet controller: Device 1234:11e8
+00: 34 12 e8 11 00 00 00 00 00 00 00 02 00 00 00 00
+10: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+20: 00 00 00 00 00 00 00 00 00 00 00 00 f4 1a 00 11
+30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 ```
 
 ## 📝 dmesg Output
