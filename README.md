@@ -56,25 +56,30 @@ It is structured so you can explore progressively—from simplest PCI BAR exampl
 ## 1️⃣ Build default Yocto image
 
 Refer to the yocto-playground README.
+https://github.com/Abhishekojha38/yocto-playground/blob/main/README.md
 
 ## 2️⃣ Modify QEMU to add PCIe device
 
 ``` bash
 devtool modify qemu-system-native
 cd ~/yocto-playground/build/workspace/sources/qemu-system-native
-cp device/01-basic/qemu/minimal_pcie_nic.c hw/pci/minimal_pcie_nic.c
+cp ~/qemu-pcie/device/01-basic/qemu/minimal_pcie_nic.c hw/pci/minimal_pcie_nic.c
 ```
 
 ## 3️⃣ Add Kconfig entry
 
+```bash
     config MINIMAL_PCIE_NIC
         bool
         default y if TEST_DEVICES
         depends on PCI
+```
 
 ## 4️⃣ Add Meson build entry
 
+```bash
     system_ss.add(when: 'CONFIG_MINIMAL_PCIE_NIC', if_true: files('minimal_pcie_nic.c'))
+```
 
 ## 5️⃣ Commit changes
 
