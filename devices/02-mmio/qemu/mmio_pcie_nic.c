@@ -121,10 +121,19 @@ static void minimal_pcie_nic_realize(PCIDevice *pdev, Error **errp)
     /* PCI config space: set vendor/device IDs and class */
     pci_config_set_vendor_id(pdev->config, 0x1af4);
     pci_config_set_device_id(pdev->config, 0x10f1);
+
+    /* Class: Ethernet controller */
     pci_config_set_class(pdev->config, PCI_CLASS_NETWORK_ETHERNET);
+
+    /* Revision ID */
+    pci_config_set_revision(pdev->config, 0x01);
 
     /* Initialize internal "registers" to zero */
     memset(s->regs, 0, sizeof(s->regs));
+
+    /* Command register: enable memory accesses and bus mastering */
+    uint16_t cmd = PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
+    pci_set_word(pdev->config + PCI_COMMAND, cmd);
 
     /* Create BAR0 MMIO region
      * - Size = 4 KB
@@ -149,12 +158,18 @@ static void minimal_pcie_nic_uninit(PCIDevice *pdev)
 static void minimal_pcie_nic_class_init(ObjectClass *klass, void *data)
 {
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
     k->realize  = minimal_pcie_nic_realize;
     k->exit = minimal_pcie_nic_uninit;
     k->vendor_id = 0x1af4;
     k->device_id = 0x10f1;
+
+    /* Class: Ethernet controller */
     k->class_id  = PCI_CLASS_NETWORK_ETHERNET;
+    k->revision = 0x1; //set initial revision
+    set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
+    dc->desc = "Minimal PCIe NIC Card";
 }
 
 /* Type registration */
