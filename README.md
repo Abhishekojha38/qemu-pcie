@@ -27,6 +27,10 @@
     -   [🔢 Memory Read/Write](#-Memory-Read/Write)
     -   [📦 MMIO Region Layout](#-MMIO-Region-Layout)
     -   [🔄 Read–Write Flow](#-Read–Write-Flow)
+-   [🔰 03-msi-x Demo](#-03-msi-x-demo)
+    -   [🔍 lspci Output](#-lspci-output)
+    -   [📝 dmesg Output](#-dmesg-output)
+    -   [⚡ Cat /proc/interrupts](#-Cat-proc-interrupts)
 
 This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
 It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
@@ -220,64 +224,67 @@ Offset   Size   Description
 0x1000   ...    (end of 4 KB region)
 ```
 
-## 🔄 Read–Write Flow
+# 🔰 03-msi-x Demo
 
-```diagram
-+-----------------------------------------------------------+
-|                      PCIe Device                          |
-|                 (Your Minimal NIC Model)                  |
-+-----------------------------------------------------------+
-                |                     |
-                | Exposes BAR0        |
-                | Size = 4 KB         |
-                v                     |
-+-----------------------------------------------------------+
-|                 PCI Configuration Space                    |
-|  - Vendor ID 0x1234                                         |
-|  - Device ID 0x11E8                                         |
-|  - BAR0 = 0x10043000 (assigned by OS)                      |
-|  - Command Register (MemEnable, BusMasterEnable)            |
-+-----------------------------------------------------------+
-                |
-                | BAR0 maps NIC registers into system memory
-                v
-+-----------------------------------------------------------+
-|              System Physical Address Space                |
-+-----------------------------------------------------------+
-|   0x10043000  →  +--------------------------------------+ |
-|                  |         MMIO Region (4 KB)           | |
-|                  |--------------------------------------| |
-|   0x10043000  →  | 0x0000  Control Register             | |
-|   0x10043004  →  | 0x0004  Status Register              | |
-|   0x10043008  →  | 0x0008  TX Buffer Pointer            | |
-|   0x1004300C  →  | 0x000C  RX Buffer Pointer            | |
-|   0x10043010  →  | 0x0010  IRQ Status                   | |
-|   0x10043014  →  | 0x0014  IRQ Mask                     | |
-|                  |   ... (rest of 4 KB region)          | |
-|   0x10043FFF  →  +--------------------------------------+ |
-+-----------------------------------------------------------+
-                |
-                | Linux maps BAR0 into kernel virtual space
-                v
-+-----------------------------------------------------------+
-|               Kernel Virtual Address (ioremap)            |
-|       mmio_base = 0xffff9243c0000000 (example)            |
-+-----------------------------------------------------------+
-                |
-                | Register access through ioread32/iowrite32
-                v
-+-----------------------------------------------------------+
-|              Example Register Access Flow                |
-+-----------------------------------------------------------+
-| CPU → iowrite32(0x1, mmio_base + 0x0000)                  |
-|  → QEMU MMIO write callback                               |
-|  → mynic_mmio_write() updates internal NIC state           |
-|                                                           |
-| CPU ← ioread32(mmio_base + 0x0004)                        |
-|  ← QEMU MMIO read callback                                |
-|  ← mynic_mmio_read() returns register value                |
-+-----------------------------------------------------------+
+MSI-X requires an additional BAR to store the MSI-X table and Pending Bit Array (PBA).
 
+```text
++-----------------------+ 0x10043000 (BAR0)
+|   Control Registers   |
+|        (4 KB)         |
++-----------------------+ 0x10044000 (BAR1)
+|   MSI-X Table & PBA   |
+|        (4 KB)         |
++-----------------------+ 0x10045000
+```
+
+Meaning:
+* BAR0 Size: `4 KB` (Registers)
+* BAR1 Size: `4 KB` (MSI-X Table & PBA)
+* Host Physical Address: `0x10043000` (BAR0), `0x10044000` (BAR1)
+* Type: MMIO, non-prefetchable
+
+## 🔍 lspci Output
+
+``` bash
+00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
+        Subsystem: Red Hat, Inc. Device 1100
+        Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx+
+        Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+        Latency: 0
+        Region 0: Memory at 10043000 (32-bit, non-prefetchable) [size=4K]
+        Region 1: Memory at 10044000 (32-bit, non-prefetchable) [size=4K]
+        Capabilities: [b0] MSI-X: Enable+ Count=1 Masked-
+                Vector table: BAR=1 offset=00000000
+                PBA: BAR=1 offset=00000800
+        Kernel driver in use: minimal_pcie_nic_drv
+        Kernel modules: minimal_pcie_nic_drv
+
+00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
+00: f4 1a f1 10 06 04 10 00 01 00 00 02 00 00 00 00
+10: 00 30 04 10 00 40 04 10 00 00 00 00 00 00 00 00
+20: 00 00 00 00 00 00 00 00 00 00 00 00 f4 1a 00 11
+30: 00 00 00 00 b0 00 00 00 00 00 00 00 00 00 00 00
+```
+
+## 📝 dmesg Output
+
+``` bash
+pci 0000:00:05.0: [1af4:10f1] type 00 class 0x020000 conventional PCI endpoint
+pci 0000:00:05.0: BAR 0 [mem 0x00000000-0x00000fff]
+pci 0000:00:05.0: BAR 1 [mem 0x00000000-0x00000fff]
+pci 0000:00:05.0: BAR 0 [mem 0x10043000-0x10043fff]: assigned
+pci 0000:00:05.0: BAR 1 [mem 0x10044000-0x10044fff]: assigned
+minimal_pcie_nic_drv: probe
+minimal_pcie_nic_drv: BAR0=00000000e9e3cdb1 BAR1=000000000e78f9d6 IRQ=38
+```
+
+## 📝 Cat /proc/interrupts
+
+``` bash
+root@playground-arm64:~# cat /proc/interrupts |grep minimal_pcie_nic_drv
+ 38:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
+root@playground-arm64:~# 
 ```
 
 ## 🧑‍💻 Author
