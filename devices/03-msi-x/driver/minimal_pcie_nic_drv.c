@@ -7,21 +7,24 @@
 #define DRV_NAME "minimal_pcie_nic_drv"
 #define VENDOR_ID 0x1af4
 #define DEVICE_ID 0x10f1
+#define MAX_MSI_VECTORS 4 // define in qemu pci device minimal_pci_nic
+#define MAX_MSIX_VECTORS 4 // define in qemu pci device minimal_pci_nic
+
+#define MSIX_ENABLE
 
 struct minimal_dev {
     struct pci_dev *pdev;
     void __iomem *bar0;    // MMIO registers
     void __iomem *bar1;    // MSI-X table/PBA (optional mapping)
-    int irq;
+    int nvec_irq;
 };
 
 static irqreturn_t minimal_irq_handler(int irq, void *dev_id)
 {
     struct minimal_dev *mdev = dev_id;
-
     pr_info(DRV_NAME ": MSI-X interrupt received\n");
+    pr_info("IRQ %d fired\n", irq);
 
-    /* Acknowledge device here if needed (BAR0 register write) */
     return IRQ_HANDLED;
 }
 
@@ -29,7 +32,7 @@ static int minimal_probe(struct pci_dev *pdev,
                          const struct pci_device_id *id)
 {
     struct minimal_dev *mdev;
-    int ret;
+    int ret, nvec, i;
 
     pr_info(DRV_NAME ": probe\n");
 
@@ -47,22 +50,36 @@ static int minimal_probe(struct pci_dev *pdev,
 
     pci_set_master(pdev);
 
-    /* Enable MSI-X (1 vector) */
-    ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSIX);
-    if (ret < 0) {
-        dev_err(&pdev->dev, "MSI-X enable failed\n");
-        goto err_disable;
-    }
+#ifdef MSIX_ENABLE
+    /* Request MSI-X vectors explicitly */
+    mdev->nvec_irq = pci_alloc_irq_vectors(pdev,
+                                1,    // min vectors
+                                MAX_MSIX_VECTORS,    // max vectors
+                                PCI_IRQ_MSIX);
+#else
+    /* Fallback to MSI with per-vector masking */
+    mdev->nvec_irq = pci_alloc_irq_vectors(pdev,
+                                1,
+                                MAX_MSI_VECTORS,
+                                PCI_IRQ_MSI);
+#endif
 
-    mdev->irq = pci_irq_vector(pdev, 0);
+    if (mdev->nvec_irq < 0)
+        return mdev->nvec_irq;
 
-    /* Request IRQ */
-    ret = devm_request_irq(&pdev->dev, mdev->irq,
-                           minimal_irq_handler,
-                           0, DRV_NAME, mdev);
-    if (ret) {
-        dev_err(&pdev->dev, "IRQ request failed\n");
-        goto err_irq;
+    for (i = 0; i < mdev->nvec_irq; i++) {
+        int irq = pci_irq_vector(pdev, i);
+
+        ret = devm_request_irq(&pdev->dev,
+                               irq,
+                               minimal_irq_handler,
+                               0,
+                               DRV_NAME,
+                               mdev);
+        if (ret) {
+            dev_err(&pdev->dev, "IRQ %d request failed\n", i);
+            goto err_irq;
+        }
     }
 
     /* Map BAR0 (device MMIO) */
@@ -87,8 +104,8 @@ static int minimal_probe(struct pci_dev *pdev,
         goto err_region1;
     }
 
-    pr_info(DRV_NAME ": BAR0=%p BAR1=%p IRQ=%d\n",
-            mdev->bar0, mdev->bar1, mdev->irq);
+    pr_info(DRV_NAME ": BAR0=%p BAR1=%p IRQ Vector Number=%d\n",
+            mdev->bar0, mdev->bar1, mdev->nvec_irq);
 
     return 0;
 

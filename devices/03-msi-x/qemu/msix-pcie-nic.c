@@ -22,8 +22,9 @@
 #include "hw/irq.h"
 
 #define TYPE_MINIMAL_PCIE_NIC "minimal-pcie-nic"
-#define MSIX_NUM_VECTORS 1
+#define MSIX_NUM_VECTORS 4
 #define MSIX_BAR_SIZE   0x1000
+#define MSIX_ENABLE
 
 OBJECT_DECLARE_SIMPLE_TYPE(MinimalPCIeNICState, MINIMAL_PCIE_NIC)
 
@@ -34,6 +35,33 @@ typedef struct MinimalPCIeNICState {
     MemoryRegion msix_bar;      /* BAR1: MSI-X table + PBA */
     uint32_t regs[16];         /* Simulated device registers (64 bytes) */
 } MinimalPCIeNICState;
+
+/* Generate MSI/MSI-X interrupt */
+static void minimal_raise_irq(MinimalPCIeNICState *s, uint32_t vector)
+{
+    PCIDevice *pdev = &s->parent_obj;
+
+#ifdef MSIX_ENABLE
+    printf("MSI-X vector %u\n", vector);
+    if (msix_enabled(pdev)) {
+        if (vector < msix_nr_vectors_allocated(pdev)) {
+            printf("msix notify MSI-X vector %u\n", vector);
+            msix_notify(pdev, vector);
+        } else {
+            printf("invalid MSI-X vector %u\n", vector);
+        }
+        return;
+    }
+#endif
+
+    /* Fallback to MSI */
+    if (msi_enabled(pdev)) {
+        msi_notify(pdev, vector);
+        return;
+    }
+
+    printf("interrupts not enabled\n");
+}
 
 /* MMIO read callback */
 static uint64_t minimal_mmio_read(void *opaque, hwaddr addr, unsigned size)
@@ -74,38 +102,56 @@ static uint64_t minimal_mmio_read(void *opaque, hwaddr addr, unsigned size)
 }
 
 /* MMIO write callback */
-static void minimal_mmio_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
+static void minimal_mmio_write(void *opaque,
+                               hwaddr addr,
+                               uint64_t data,
+                               unsigned size)
 {
     MinimalPCIeNICState *s = opaque;
 
     if (addr + size > sizeof(s->regs)) {
-        printf("minimal_pcie_nic: MMIO write out-of-bounds addr=0x%#" PRIx64 " size=%u\n",
-               (uint64_t)addr, size);
+        printf("minimal_pcie_nic: MMIO write out-of-bounds addr=0x%#" PRIx64
+               " size=%u\n", (uint64_t)addr, size);
         return;
     }
 
-    printf("minimal_pcie_nic: MMIO write addr=0x%#" PRIx64 " size=%u data=0x%llx\n",
+    printf("minimal_pcie_nic: MMIO write addr=0x%#" PRIx64
+           " size=%u data=0x%llx\n",
            (uint64_t)addr, size, (unsigned long long)data);
 
-    /* Write to regs[], little-endian */
+
+    /* This is only for msi/msi-x testing */
+    if (addr == 0x0 && size == 4) {
+        uint32_t vector = data & 0xff;
+
+        printf("minimal_pcie_nic: trigger IRQ vector=%u\n", vector);
+        minimal_raise_irq(s, vector);
+        return;
+    }
+
+    /* Normal register write */
     switch (size) {
     case 1:
         *((uint8_t *)s->regs + addr) = data & 0xff;
         break;
     case 2:
-        *(uint16_t *)((uint8_t *)s->regs + addr) = cpu_to_le16(data & 0xffff);
+        *(uint16_t *)((uint8_t *)s->regs + addr) =
+            cpu_to_le16(data & 0xffff);
         break;
     case 4:
-        *(uint32_t *)((uint8_t *)s->regs + addr) = cpu_to_le32(data & 0xffffffff);
+        *(uint32_t *)((uint8_t *)s->regs + addr) =
+            cpu_to_le32(data & 0xffffffff);
         break;
     case 8:
-        *(uint64_t *)((uint8_t *)s->regs + addr) = cpu_to_le64(data);
+        *(uint64_t *)((uint8_t *)s->regs + addr) =
+            cpu_to_le64(data);
         break;
     default:
         printf("minimal_pcie_nic: MMIO write unsupported size %u\n", size);
-        return;
+        break;
     }
 }
+
 
 /* MemoryRegionOps for the MMIO region */
 static const MemoryRegionOps minimal_mmio_ops = {
@@ -151,22 +197,41 @@ static void minimal_pcie_nic_realize(PCIDevice *pdev, Error **errp)
      */
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->mmio);
 
-        /* BAR1: MSI-X table */
-    memory_region_init(&s->msix_bar, OBJECT(s),"minimal-msix-bar", MSIX_BAR_SIZE);
+    /* BAR1: MSI-X table */
+    memory_region_init(&s->msix_bar, OBJECT(s), "minimal-msix-bar", MSIX_BAR_SIZE);
 
     pci_register_bar(pdev, 1, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->msix_bar);
-      /* MSI-X capability */
+
+#ifdef MSIX_ENABLE
+    /* MSI-X capability */
     msix_init(pdev, MSIX_NUM_VECTORS, &s->msix_bar,
-              1,                  /* BAR index */
-              0x0,                /* table offset */
+              1,      /* BAR index */
+              0x0,    /* table offset */
               &s->msix_bar,
-              1,
-              0x800);             /* PBA offset */
+              1,      /* PBA BAR index */
+              0x800); /* PBA offset */
+#else
+    /* Enable MSI (number of vectors) with per-vector masking */
+    if (msi_init(pdev,
+                 0,      /* offset in config space */
+                 4,      /* number of MSI vectors */
+                 false,  /* 32-bit address */
+                 true,   /* per-vector masking enabled */
+                 errp) < 0) {
+        return;
+    }
+#endif
+
+
 }
 
 static void minimal_pcie_nic_uninit(PCIDevice *pdev)
 {
+#ifdef MSIX_ENABLE
     msix_uninit(pdev);
+#else
+    msi_uninit(pdev);
+#endif
     printf("pcie nic un-init\n");
 }
 
