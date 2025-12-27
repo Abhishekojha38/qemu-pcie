@@ -18,19 +18,24 @@
         modifications](#6️⃣-finish-devtool-modifications)
     -   [7️⃣ Build final image](#7️⃣-build-final-image)
     -   [▶️ Launch QEMU](#️-launch-qemu)
--   [🔰 01-basic Demo](#-01-basic-demo)
-    -   [🔍 lspci Output](#-lspci-output)
-    -   [📝 dmesg Output](#-dmesg-output)
--   [🔰 02-mmio Demo](#-02-mmio-demo)
-    -   [🔍 lspci Output](#-lspci-output)
-    -   [📝 dmesg Output](#-dmesg-output)
+-   [🔰 01-basic Demo](#-01-basic-Demo)
+    -   [🔍 Basic lspci output](#-Basic-lspci-output)
+    -   [📝 Basic dmesg output](#-Basic-dmesg-output)
+-   [🔰 02-mmio Demo](#-02-mmio-Demo)
+    -   [🔍 MMIO lspci output](#-MMIO-lspci-output)
+    -   [📝 MMIO dmesg output](#-MMIO-dmesg-output)
     -   [🔢 Memory Read/Write](#-Memory-Read/Write)
     -   [📦 MMIO Region Layout](#-MMIO-Region-Layout)
     -   [🔄 Read–Write Flow](#-Read–Write-Flow)
--   [🔰 03-msi-x Demo](#-03-msi-x-demo)
-    -   [🔍 lspci Output](#-lspci-output)
-    -   [📝 dmesg Output](#-dmesg-output)
-    -   [⚡ Cat /proc/interrupts](#-Cat-proc-interrupts)
+-   [🔰 03-msi-x Demo](#-03-msi-x-Demo)
+    -   [🧠 Understand MSI](#-Understand-MSI)
+    -   [🔍 MSI lspci output](#-MSI-lspci-output)
+    -   [📝 MSI dmesg output](#-MSI-dmesg-output)
+    -   [⚡ MSI cat /proc/interrupts](#-MSI-cat-proc-interrupts)
+    -   [🧠 Understand MSI-X](#-Understand-MSI-X)
+    -   [🔍 MSI-X lspci output](#-MSI-X-lspci-output)
+    -   [📝 MSI-X dmesg output](#-MSI-X-dmesg-output)
+    -   [⚡ cat /proc/interrupts](#-cat-proc-interrupts)
 
 This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
 It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
@@ -119,7 +124,7 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 
 # 🔰 01-basic Demo
 
-## 🔍 lspci Output
+## 🔍 Basic lspci output
 
 ``` bash
 00:05.0 Ethernet controller: Device 1234:11e8
@@ -133,7 +138,7 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 ```
 
-## 📝 dmesg Output
+## 📝 Basic dmesg output
 
 ``` bash
 pci 0000:00:05.0: [1234:11e8] type 00 class 0x020000
@@ -147,7 +152,7 @@ Meaning:
 * Host Physical Address: `0x10043000`
 * Type: MMIO, non-prefetchable (normal for NIC registers)
 
-## 🔍 lspci Output
+## 🔍 MMIO lspci output
 
 ``` bash
 00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1
@@ -163,7 +168,7 @@ Meaning:
 30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 ```
 
-## 📝 dmesg Output
+## 📝 MMIO dmesg output
 
 ``` bash
 pci 0000:00:05.0: BAR 0 [mem 0x10043000-0x10043fff]: assigned    
@@ -209,22 +214,137 @@ root@playground-arm64:~#
 > All the minimal_pcie_nic: prints are from the read write callbacks. Check source
 > code for more details. 
 
-## 📦 MMIO Region Layout
+# 🔰 03-msi-x Demo
 
-You can describe your NIC’s register map like this:
-```log
-Offset   Size   Description
-------------------------------------
-0x0000   4      Control Register
-0x0004   4      Status Register
-0x0008   4      TX Buffer Pointer
-0x000C   4      RX Buffer Pointer
-0x0010   4      Interrupt Status
-0x0014   4      Interrupt Mask
-0x1000   ...    (end of 4 KB region)
+## 🧠 Understand MSI
+
+![MSI Diagram](Images/msi.png)
+
+* Devices generate interrupts by writing a specific data value to a pre-defined memory address.
+* Each device can have multiple MSI vectors (up to 32 for MSI, 2048 for MSI-X).
+* Each interrupt vector is assigned a unique message address and data value.
+* No IRQ sharing is needed, which improves performance and simplifies debugging.
+
+![MSI Write Tlp Diagram](Images/msi-write-tlp.png)
+
+## 🔍 MSI lspci output
+
+```bash
+00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
+        Subsystem: Red Hat, Inc. Device 1100
+        Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx+
+        Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+        Latency: 0
+        Interrupt: pin ? routed to IRQ 38
+        Region 0: Memory at 10043000 (32-bit, non-prefetchable) [size=4K]
+        Region 1: Memory at 10044000 (32-bit, non-prefetchable) [size=4K]
+        Capabilities: [40] MSI: Enable- Count=1/4 Maskable+ 64bit-
+                Address: 08020040  Data: 0060
+                Masking: 00000000  Pending: 00000000
+        Kernel driver in use: minimal_pcie_nic_drv
+        Kernel modules: minimal_pcie_nic_drv
 ```
 
-# 🔰 03-msi-x Demo
+*   **[40]**: Offset 0x40 in PCI configuration space where the MSI capability structure begins.
+*   **Enable+**: MSI is active, replacing legacy INTx interrupts.
+*   **Count=4/4**: The device requested 4 vectors, and the OS granted all 4.
+*   **Maskable-**: Per-vector masking is not supported by this hardware.
+*   **64bit-**: The device uses 32-bit MSI addressing.
+*   **Address/Data**: The memory-write parameters (Address `08020040`, Data `0060`) used to trigger the interrupt.
+*   All vectors (if multiple allowed) share the same MSI address.
+*   The data value is what tells the CPU/APIC which vector is being triggered.
+*   QEMU uses nr_vectors to encode data for each vector.
+
+so in MSI:
+
+```bash
+Address: 0x08020040   (same for all vectors)
+Data: 0x60, 0x61, 0x62, 0x63  (different for each vector)
+```
+Writing 0x60 triggers vector 0.
+Writing 0x61 triggers vector 1.
+…and so on.
+Address is always the same.
+
+```c
+// QEMU Device code
+msi_notify(pdev, 0); // writes address/data for vector 0
+msi_notify(pdev, 1); // writes address/data for vector 1 (same address, different data)
+```
+
+## MSI Dmesg output
+
+```bash
+[    2.288816] minimal_pcie_nic_drv: probe
+[    2.290627] minimal_pcie_nic_drv: BAR0=0000000062334fd4 BAR1=000000007446aa01 IRQ Vector Number=4
+```
+
+## 📝 MSI cat /proc/interrupts
+
+* **38-41** Linux IRQ numbers assigned to the 4 MSI vectors.
+* **GICv2m-PCI-MSI** The interrupt controller (MSI frame) handling the messages.
+* **0-3** Relative vector index within the device.
+* **minimal_pcie_nic_drv** The driver associated with these interrupts.
+
+```bash
+root@playground-arm64:~# cat /proc/interrupts 
+           CPU0       CPU1       CPU2       CPU3       
+ 38:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
+ 39:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
+ 40:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
+ 41:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
+root@playground-arm64:~#
+```
+
+## To simulate the generation is msi interrupt for each vector, we can follow this sequence:
+
+```bash
+# This is to only test the MSI interrupt generation
+Guest driver writes to BAR0 register
+        ↓
+QEMU device detects write
+        ↓
+QEMU triggers MSI / MSI-X vector N
+        ↓
+Linux IRQ handler for vector N runs
+```
+
+```bash
+# Vector 0
+# Write BAR0 to generate MSI interrupt
+root@playground-arm64:~# devmem2 0x10043000 w 0x00000000
+
+# dmesg logs
+[  470.624926] minimal_pcie_nic_drv: MSI-X interrupt received
+[  470.625269] IRQ 38 fired
+
+# cat /proc/interrupts (vector 0 interrupt is generated on CPU0)
+        CPU0  CPU1  CPU2  CPU3 
+ 38:      1     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
+ 39:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
+ 40:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
+ 41:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
+
+# Vector 1
+# Write BAR0 to generate MSI interrupt
+root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
+
+# dmesg logs
+[  179.056541] minimal_pcie_nic_drv: MSI-X interrupt received
+[  179.056870] IRQ 39 fired
+
+# cat /proc/interrupts (vector 1 interrupt is generated on CPU0)
+        CPU0  CPU1  CPU2  CPU3 
+ 38:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
+ 39:      1     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
+ 40:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
+ 41:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
+ ```
+
+Similarly we can generate interrupt for other vectors (2 and 3) by writing 0x00000002 and 0x00000003 to BAR0.
+
+
+## Understand MSI-X
 
 MSI-X requires an additional BAR to store the MSI-X table and Pending Bit Array (PBA).
 
@@ -244,7 +364,7 @@ Meaning:
 * Host Physical Address: `0x10043000` (BAR0), `0x10044000` (BAR1)
 * Type: MMIO, non-prefetchable
 
-## 🔍 lspci Output
+## 🔍 MSI-X lspci output
 
 ``` bash
 00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
@@ -254,20 +374,23 @@ Meaning:
         Latency: 0
         Region 0: Memory at 10043000 (32-bit, non-prefetchable) [size=4K]
         Region 1: Memory at 10044000 (32-bit, non-prefetchable) [size=4K]
-        Capabilities: [b0] MSI-X: Enable+ Count=1 Masked-
+        Capabilities: [b0] MSI-X: Enable+ Count=4 Masked-
                 Vector table: BAR=1 offset=00000000
                 PBA: BAR=1 offset=00000800
         Kernel driver in use: minimal_pcie_nic_drv
         Kernel modules: minimal_pcie_nic_drv
 
+root@playground-arm64:~# lspci -s 00:05.0 -x
 00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
 00: f4 1a f1 10 06 04 10 00 01 00 00 02 00 00 00 00
 10: 00 30 04 10 00 40 04 10 00 00 00 00 00 00 00 00
 20: 00 00 00 00 00 00 00 00 00 00 00 00 f4 1a 00 11
-30: 00 00 00 00 b0 00 00 00 00 00 00 00 00 00 00 00
+30: 00 00 00 00 a8 00 00 00 00 00 00 00 00 00 00 00
+
+root@playground-arm64:~#
 ```
 
-## 📝 dmesg Output
+## 📝 MSI-X dmesg output
 
 ``` bash
 pci 0000:00:05.0: [1af4:10f1] type 00 class 0x020000 conventional PCI endpoint
@@ -276,15 +399,16 @@ pci 0000:00:05.0: BAR 1 [mem 0x00000000-0x00000fff]
 pci 0000:00:05.0: BAR 0 [mem 0x10043000-0x10043fff]: assigned
 pci 0000:00:05.0: BAR 1 [mem 0x10044000-0x10044fff]: assigned
 minimal_pcie_nic_drv: probe
-minimal_pcie_nic_drv: BAR0=00000000e9e3cdb1 BAR1=000000000e78f9d6 IRQ=38
+minimal_pcie_nic_drv: BAR0=00000000c08f3e51 BAR1=00000000282d1ca9 IRQ Vector Number=4
 ```
 
-## 📝 Cat /proc/interrupts
+## 📝 MSI-X cat /proc/interrupts
 
 ``` bash
-root@playground-arm64:~# cat /proc/interrupts |grep minimal_pcie_nic_drv
  38:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
-root@playground-arm64:~# 
+ 39:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
+ 40:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
+ 41:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
 ```
 
 ## 🧑‍💻 Author
