@@ -277,7 +277,7 @@ for (i = 0; i < mdev->nvec_irq; i++) {
         Interrupt: pin ? routed to IRQ 38
         Region 0: Memory at 10043000 (32-bit, non-prefetchable) [size=4K]
         Region 1: Memory at 10044000 (32-bit, non-prefetchable) [size=4K]
-        Capabilities: [40] MSI: Enable- Count=1/4 Maskable+ 64bit-
+        Capabilities: [40] MSI: Enable+ Count=4/4 Maskable+ 64bit-
                 Address: 08020040  Data: 0060
                 Masking: 00000000  Pending: 00000000
         Kernel driver in use: minimal_pcie_nic_drv
