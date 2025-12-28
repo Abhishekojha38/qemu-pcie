@@ -44,6 +44,7 @@ static int minimal_probe(struct pci_dev *pdev,
     pci_set_drvdata(pdev, mdev);
 
     /* Enable PCI device and bus-mastering */
+    pr_info(DRV_NAME ": PCI enable device\n");
     ret = pci_enable_device(pdev);
     if (ret)
         return ret;
@@ -53,9 +54,9 @@ static int minimal_probe(struct pci_dev *pdev,
 #ifdef MSIX_ENABLE
     /* Request MSI-X vectors explicitly */
     mdev->nvec_irq = pci_alloc_irq_vectors(pdev,
-                                1,    // min vectors
-                                MAX_MSIX_VECTORS,    // max vectors
-                                PCI_IRQ_MSIX);
+                                           1,    // min vectors
+                                           MAX_MSIX_VECTORS,    // max vectors
+                                           PCI_IRQ_MSIX);
 #else
     /* Fallback to MSI with per-vector masking */
     mdev->nvec_irq = pci_alloc_irq_vectors(pdev,

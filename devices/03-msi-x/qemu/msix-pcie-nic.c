@@ -21,10 +21,12 @@
 #include "exec/memory.h" /* MemoryRegion */
 #include "hw/irq.h"
 
-#define TYPE_MINIMAL_PCIE_NIC "minimal-pcie-nic"
-#define MSIX_NUM_VECTORS 4
-#define MSIX_BAR_SIZE   0x1000
-#define MSIX_ENABLE
+#define TYPE_MINIMAL_PCIE_NIC "minimal-pcie-nic"    // qemu device name
+#define MSI_NUM_VECTORS         4                   // msi max vectors
+#define MSIX_NUM_VECTORS        4                   // msi-x max vectors
+#define MSIX_BAR_SIZE           0x1000              // 4KB MSIX Bar size
+#define MSIX_ENABLE                                 // Select MSI or MSI-X
+#define MSIX_IDX                1                   // Use BAR 1 for MSI-X
 
 OBJECT_DECLARE_SIMPLE_TYPE(MinimalPCIeNICState, MINIMAL_PCIE_NIC)
 
@@ -42,26 +44,48 @@ static void minimal_raise_irq(MinimalPCIeNICState *s, uint32_t vector)
     PCIDevice *pdev = &s->parent_obj;
 
 #ifdef MSIX_ENABLE
-    printf("MSI-X vector %u\n", vector);
     if (msix_enabled(pdev)) {
         if (vector < msix_nr_vectors_allocated(pdev)) {
-            printf("msix notify MSI-X vector %u\n", vector);
             msix_notify(pdev, vector);
         } else {
             printf("invalid MSI-X vector %u\n", vector);
         }
         return;
     }
-#endif
-
+#else
     /* Fallback to MSI */
     if (msi_enabled(pdev)) {
         msi_notify(pdev, vector);
         return;
     }
+#endif
 
     printf("interrupts not enabled\n");
 }
+
+static void
+minimal_init_msix(MinimalPCIeNICState *s)
+{
+    int i, res;
+
+    res = msix_init(PCI_DEVICE(s), MSIX_NUM_VECTORS,
+                    &s->msix_bar,
+                    MSIX_IDX,       /* BAR index */
+                    0,              /* table offset */
+                    &s->msix_bar,
+                    MSIX_IDX,       /* PBA BAR index */
+                    0x800,
+                    0x98, NULL);
+
+    if (res < 0) {
+        return ;
+    } else {
+        for (i = 0; i < MSIX_NUM_VECTORS; i++) {
+            msix_vector_use(PCI_DEVICE(s), i);
+        }
+    }
+}
+
 
 /* MMIO read callback */
 static uint64_t minimal_mmio_read(void *opaque, hwaddr addr, unsigned size)
@@ -198,18 +222,14 @@ static void minimal_pcie_nic_realize(PCIDevice *pdev, Error **errp)
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->mmio);
 
     /* BAR1: MSI-X table */
-    memory_region_init(&s->msix_bar, OBJECT(s), "minimal-msix-bar", MSIX_BAR_SIZE);
+    memory_region_init(&s->msix_bar, OBJECT(s), "minimal-msix-bar", 
+                        MSIX_BAR_SIZE);
 
     pci_register_bar(pdev, 1, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->msix_bar);
 
 #ifdef MSIX_ENABLE
     /* MSI-X capability */
-    msix_init(pdev, MSIX_NUM_VECTORS, &s->msix_bar,
-              1,      /* BAR index */
-              0x0,    /* table offset */
-              &s->msix_bar,
-              1,      /* PBA BAR index */
-              0x800); /* PBA offset */
+    minimal_init_msix(s);
 #else
     /* Enable MSI (number of vectors) with per-vector masking */
     if (msi_init(pdev,
