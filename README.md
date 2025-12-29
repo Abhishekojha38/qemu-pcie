@@ -72,6 +72,8 @@ It is structured so you can explore progressively—from simplest PCI BAR exampl
 Refer to the yocto-playground README.
 https://github.com/Abhishekojha38/yocto-playground/blob/main/README.md
 
+![Call Flow](Images/CallFlow.png)
+
 ## 2️⃣ Modify QEMU to add PCIe device
 
 ``` bash
@@ -503,7 +505,7 @@ minimal_pcie_nic_drv: BAR0=00000000c08f3e51 BAR1=00000000282d1ca9 IRQ Vector Num
  41:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
 ```
 
-## To simulate the generation is msi interrupt for each vector, we can follow this sequence:
+## To simulate the generation is msi-x interrupt for each vector, we can follow this sequence:
 
 ```bash
 # This is to only test the MSI interrupt generation
