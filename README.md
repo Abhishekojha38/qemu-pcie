@@ -32,8 +32,8 @@
     -   [How to use MSI-X for QEMU device](#how-to-use-msi-x-for-qemu-device)
     -   [🔍 MSI-X lspci output](#-msi-x-lspci-output)
     -   [📝 MSI-X dmesg output](#-msi-x-dmesg-output)
-    -   [📝 MSI-X cat /proc/interrupts](#-msi-x-cat-proc-interrupts)
-    -   [To simulate the generation is msi interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-interrupt-for-each-vector-we-can-follow-this-sequence-1)
+       [📝 MSI-X cat /proc/interrupts](#-msi-x-cat-proc-interrupts)
+    -   [To simulate the generation is msi-x interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-x-interrupt-for-each-vector-we-can-follow-this-sequence-1)
 
 This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
 It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
