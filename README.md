@@ -13,27 +13,36 @@
     -   [5️⃣ Commit changes](#5️⃣-commit-changes)
     -   [6️⃣ Finish devtool modifications](#6️⃣-finish-devtool-modifications)
     -   [7️⃣ Build final image](#7️⃣-build-final-image)
-    -   [▶️ Launch QEMU](#️-launch-qemu)
--   [🔰 01-basic Demo](#-01-basic-demo)
-    -   [🔍 Basic lspci output](#-basic-lspci-output)
-    -   [📝 Basic dmesg output](#-basic-dmesg-output)
--   [🔰 02-mmio Demo](#-02-mmio-demo)
-    -   [🔍 MMIO lspci output](#-mmio-lspci-output)
-    -   [📝 MMIO dmesg output](#-mmio-dmesg-output)
-    -   [🔢 Memory Read/Write](#-memory-readwrite)
--   [🔰 03-msi-x Demo](#-03-msi-x-demo)
-    -   [🧠 Understand MSI](#-understand-msi)
+    -   [▶️ Launch QEMU](#️▶️-launch-qemu)
+-   [🔰 01-basic Demo](#🔰-01-basic-demo)
+    -   [🔍 Basic lspci output](#🔍-basic-lspci-output)
+    -   [📝 Basic dmesg output](#📝-basic-dmesg-output)
+-   [🔰 02-mmio Demo](#🔰-02-mmio-demo)
+    -   [🔍 MMIO lspci output](#🔍-mmio-lspci-output)
+    -   [📝 MMIO dmesg output](#📝-mmio-dmesg-output)
+    -   [🔢 Memory Read/Write](#🔢-memory-readwrite)
+-   [🔰 03-msi-x Demo](#🔰-03-msi-x-demo)
+    -   [🧠 Understand MSI](#🧠-understand-msi)
     -   [How to use MSI for QEMU device](#how-to-use-msi-for-qemu-device)
-    -   [🔍 MSI lspci output](#-msi-lspci-output)
+    -   [🔍 MSI lspci output](#🔍-msi-lspci-output)
     -   [MSI Dmesg output](#msi-dmesg-output)
-    -   [📝 MSI cat /proc/interrupts](#-msi-cat-proc-interrupts)
+    -   [📝 MSI cat /proc/interrupts](#📝-msi-cat-proc-interrupts)
     -   [To simulate the generation is msi interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-interrupt-for-each-vector-we-can-follow-this-sequence)
-    -   [Understand MSI-X](#understand-msi-x)
+    -   [🧠 Understand MSI-X](#🧠-understand-msi-x)
     -   [How to use MSI-X for QEMU device](#how-to-use-msi-x-for-qemu-device)
-    -   [🔍 MSI-X lspci output](#-msi-x-lspci-output)
-    -   [📝 MSI-X dmesg output](#-msi-x-dmesg-output)
-       [📝 MSI-X cat /proc/interrupts](#-msi-x-cat-proc-interrupts)
+    -   [🔍 MSI-X lspci output](#🔍-msi-x-lspci-output)
+    -   [📝 MSI-X dmesg output](#📝-msi-x-dmesg-output)
+    -   [📝 MSI-X cat /proc/interrupts](#📝-msi-x-cat-proc-interrupts)
     -   [To simulate the generation is msi-x interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-x-interrupt-for-each-vector-we-can-follow-this-sequence-1)
+-   [🔰 04-rx-data Demo](#🔰-04-rx-data-demo)
+    -   [🔍 rx-data flow](#🔍-rx-data-flow)
+    -   [🔍 rx-data setup QEMU networking](#🔍-rx-data-setup-qemu-networking)
+    -   [🔍 rx-data lspci output](#🔍-rx-data-lspci-output)
+    -   [📝 rx-data dmesg output](#📝-rx-data-dmesg-output)
+    -   [🔍 rx-data logs](#🔍-rx-data-logs)
+    -   [🔍 rx-data ifconfig output](#🔍-rx-data-ifconfig-output)
+    -   [📝 rx-data cat /proc/interrupts](#📝-rx-data-cat-proc-interrupts)
+
 
 This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
 It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
@@ -218,14 +227,12 @@ root@playground-arm64:~#
 
 ## 🧠 Understand MSI
 
-![MSI Diagram](Images/msi.png)
+![MSI Write Tlp Diagram](Images/msi-write-tlp.png)
 
 * Devices generate interrupts by writing a specific data value to a pre-defined memory address.
 * Each device can have multiple MSI vectors (up to 32 for MSI, 2048 for MSI-X).
 * Each interrupt vector is assigned a unique message address and data value.
 * No IRQ sharing is needed, which improves performance and simplifies debugging.
-
-![MSI Write Tlp Diagram](Images/msi-write-tlp.png)
 
 ## How to use MSI for QEMU device
 
@@ -548,6 +555,113 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
  ```
 
 Similarly we can generate interrupt for other vectors (2 and 3) by writing 0x00000002 and 0x00000003 to BAR0.
+
+# 🔰 04-rx-data Demo
+This section will cover the rx data path implementatioon only for testing the packet flow from host tap1 to minimal-pcie-nic device driver. We are using ring descriptor based rx data path. the dma address information of the ring descriptor is written to BAR0 register and that is used by qemu to process the rx data path. This implementation is using dma for data transfer.
+Implementation is only for testing the rx data path and will be extended to support tx data path in future with optimization.
+
+## 🔍 rx-data flow
+
+```bash
+host → QEMU user-net → minimal-pcie-nic → RX DMA → MSI-X → driver
+```
+
+## 🔍 rx-data setup QEMU networking
+To test the rx data path, we need to bringup the minimal-pcie-nic as network device and connect it to backend tap1 interface.
+
+* *Step 1:* Create tap interface on host.
+```bash
+ip tuntap add tap1 mode tap
+ip link set tap1 up
+```
+
+* *Step 2:* Run QEMU with minimal-pcie-nic device.
+```bash
+runqemu playground-arm64 nographic qemuparams="-netdev tap,id=net1,ifname=tap1,script=no,downscript=no   -device minimal-pcie-nic,netdev=net1"
+```
+
+## 🔍 rx-data lspci output
+
+```bash
+root@playground-arm64:~# lspci
+00:00.0 Host bridge: Red Hat, Inc. QEMU PCIe Host bridge
+00:01.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+00:02.0 SCSI storage controller: Red Hat, Inc. Virtio block device
+00:03.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01) <<<< minimal-pcie-nic
+00:04.0 Display controller: Red Hat, Inc. Virtio 1.0 GPU (rev 01)
+root@playground-arm64:~#
+```
+
+## 📝 rx-data dmesg output
+
+```bash
+root@playground-arm64:~# dmesg | grep minimal_pcie_nic_drv
+minimal_pcie_nic_drv: loading out-of-tree module taints kernel.
+minimal_pcie_nic_drv: probe
+minimal_pcie_nic_drv: registered netdev eth1
+minimal_pcie_nic_drv: PCI enable device
+minimal_pcie_nic_drv: BAR0=00000000466bc38b BAR1=00000000f74bb2a9 IRQ Vector Number=4
+```
+
+* *Step 3:* Now bringup the tap1 interface and the ip address and run ping command from tap1 interface.
+
+```bash
+ip link set tap1 up
+ip addr add 192.168.1.100/24 dev tap1
+ping 192.168.1.100 -I tap1
+```
+
+## 🔍 rx-data logs
+
+After executing the ping command, we can see the rx data path is working. We are just printing the length of the received packet in the driver irq handler.
+
+```logs
+minimal_pcie_nic_drv: RX packet len=90
+minimal_pcie_nic_drv: RX packet len=90
+minimal_pcie_nic_drv: RX packet len=86
+minimal_pcie_nic_drv: RX packet len=90
+minimal_pcie_nic_drv: RX packet len=70
+minimal_pcie_nic_drv: RX packet len=90
+minimal_pcie_nic_drv: RX packet len=203
+minimal_pcie_nic_drv: RX packet len=217
+minimal_pcie_nic_drv: RX packet len=217
+minimal_pcie_nic_drv: RX packet len=110
+minimal_pcie_nic_drv: RX packet len=217
+minimal_pcie_nic_drv: RX packet len=90
+minimal_pcie_nic_drv: RX packet len=205
+minimal_pcie_nic_drv: RX packet len=203
+minimal_pcie_nic_drv: RX packet len=205
+minimal_pcie_nic_drv: RX packet len=203
+minimal_pcie_nic_drv: RX packet len=205
+minimal_pcie_nic_drv: RX packet len=70
+minimal_pcie_nic_drv: RX packet len=203
+```
+
+## 🔍 rx-data ifconfig output
+
+```bash
+root@playground-arm64:~# ifconfig eth1
+eth1: flags=4098<BROADCAST,MULTICAST>  mtu 1500
+        ether ce:bc:b6:e4:6f:07  txqueuelen 1000  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+root@playground-arm64:~#
+```
+
+## 📝 rx-data cat /proc/interrupts
+
+we are using msi-x vector 1 for rx data path. qemu device generates the interrupt for each received packet.
+
+```bash
+root@playground-arm64:~# cat /proc/interrupts
+27:         46          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   0 Edge      minimal_pcie_nic_drv
+28:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   1 Edge      minimal_pcie_nic_drv
+29:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   2 Edge      minimal_pcie_nic_drv
+30:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   3 Edge      minimal_pcie_nic_drv
+```
 
 ## 🧑‍💻 Author
 **Abhishek Ojha**
