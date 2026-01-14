@@ -161,6 +161,8 @@ Meaning:
 * Host Physical Address: `0x10043000`
 * Type: MMIO, non-prefetchable (normal for NIC registers)
 
+![MMIO](Images/pci-mmio.png)
+
 ## 🔍 MMIO lspci output
 
 ``` bash
