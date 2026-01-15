@@ -49,14 +49,29 @@ It is structured so you can explore progressively—from simplest PCI BAR exampl
 
 ## 📁 Repository Structure
 
-    devices/
-    ├── 01-basic/
-    │   ├── qemu/
-    │   │   └── minimal_pcie_nic.c
-    ├── 02-mmio/
-    │   ├── qemu/
-    │   │   └── mmio_pcie_nic.c
-    └── README.md
+```tree
+.
+├── devices
+│   ├── 01-basic
+│   │   └── qemu
+│   │       └── minimal_pcie_nic.c
+│   ├── 02-mmio
+│   │   └── qemu
+│   │       └── mmio_pcie_nic.c
+│   ├── 03-msi-x
+│   │   ├── driver
+│   │   │   └── minimal_pcie_nic_drv.c
+│   │   └── qemu
+│   │       └── msix-pcie-nic.c
+│   └── 04-rx-data
+│       ├── driver
+│       │   └── minimal_pcie_nic_drv.c
+│       └── qemu
+│           └── msix-pcie-nic.c
+├── Images
+├── LICENSE
+└── README.md
+```
 
 ## 🧰 Features Covered
 
@@ -65,13 +80,13 @@ It is structured so you can explore progressively—from simplest PCI BAR exampl
 ✔️ BARs & MMIO\
 ✔️ PCIe Configuration Space\
 ✔️ MSI / MSI-X Interrupts\
-✔️ Emulated DMA Engine
+✔️ Rx Data Path with Emulated DMA Engine
 
 ## ⚙️ What Happens When You Run QEMU
 
-1.  QEMU starts → registers PCIe device\
-2.  PCI bus finds `-device minimal-pcie-nic`\
-3.  Device realize sets IDs\
+1.  QEMU starts → registers PCIe device
+2.  PCI bus finds `-device minimal-pcie-nic`
+3.  Device realize sets IDs
 4.  Linux sees device as **1234:11E8**
 
 # 🛠️ Build Steps (Using Yocto Playground)
@@ -80,8 +95,6 @@ It is structured so you can explore progressively—from simplest PCI BAR exampl
 
 Refer to the yocto-playground README.
 https://github.com/Abhishekojha38/yocto-playground/blob/main/README.md
-
-![Call Flow](Images/CallFlow.png)
 
 ## 2️⃣ Modify QEMU to add PCIe device
 
@@ -132,6 +145,8 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 ```
 
 # 🔰 01-basic Demo
+
+![Call Flow](Images/CallFlow.png)
 
 ## 🔍 Basic lspci output
 
