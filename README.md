@@ -577,6 +577,8 @@ Similarly we can generate interrupt for other vectors (2 and 3) by writing 0x000
 This section will cover the rx data path implementatioon only for testing the packet flow from host tap1 to minimal-pcie-nic device driver. We are using ring descriptor based rx data path. the dma address information of the ring descriptor is written to BAR0 register and that is used by qemu to process the rx data path. This implementation is using dma for data transfer.
 Implementation is only for testing the rx data path and will be extended to support tx data path in future with optimization.
 
+![Call Flow](Images/rx-packet.png)
+
 ## 🔍 rx-data flow
 
 ```bash
