@@ -42,7 +42,11 @@
     -   [🔍 rx-data logs](#🔍-rx-data-logs)
     -   [🔍 rx-data ifconfig output](#🔍-rx-data-ifconfig-output)
     -   [📝 rx-data cat /proc/interrupts](#📝-rx-data-cat-proc-interrupts)
-
+-   [🔰 05-tx-rx-data Demo](#🔰-05-tx-rx-data-demo)
+    -   [📝 tx-rx-data setup QEMU networking](#📝-tx-rx-data-setup-qemu-networking)
+    -   [🔍 tx-rx-data lspci output](#🔍-tx-rx-data-lspci-output)
+    -   [📝 tx-rx-data dmesg output](#📝-tx-rx-data-dmesg-output)
+    -   [🔍 ping test](#ping-test)
 
 This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
 It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
@@ -681,6 +685,116 @@ root@playground-arm64:~# cat /proc/interrupts
 29:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   2 Edge      minimal_pcie_nic_drv
 30:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   3 Edge      minimal_pcie_nic_drv
 ```
+
+# 05-tx-rx-data-demo
+This section will cover the tx and rx data path implementation for testing the packet flow from minimal-pcie-nic device driver to host tap1 interface. We are using ring descriptor based tx and rx data path. the dma address information of the ring descriptor is written to BAR0 register and that is used by qemu to process the tx and rx data path. This implementation is using dma for data transfer.
+
+![Descriptor Mapping](Images/descriptor.png)
+
+## 🔍 tx-rx-data setup QEMU networking
+
+```bash
+# Step 1: Create tap interface on host
+ip tuntap add tap1 mode tap
+ip link set tap1 up
+```
+
+```bash
+# Step 2: Run QEMU with minimal-pcie-nic device
+runqemu playground-arm64 nographic qemuparams="-netdev tap,id=net1,ifname=tap1,script=no,downscript=no   -device minimal-pcie-nic,netdev=net1"
+```
+## 🔍 tx-rx-data lspci output
+
+```bash
+root@playground-arm64:~# lspci
+00:00.0 Host bridge: Red Hat, Inc. QEMU PCIe Host bridge
+00:01.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+00:02.0 SCSI storage controller: Red Hat, Inc. Virtio block device
+00:03.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01) <<<< minimal-pcie-nic
+00:04.0 Display controller: Red Hat, Inc. Virtio 1.0 GPU (rev 01)
+root@playground-arm64:~#
+```
+
+## 📝 tx-rx-data dmesg output
+```bash
+dmesg |grep minimal
+[    4.384142] minimal_pcie_nic_drv: loading out-of-tree module taints kernel.
+[    4.392183] minimal_pcie_nic_drv: probe
+[    4.392898] minimal_pcie_nic_drv: PCI enable device
+[    4.402920] minimal_pcie_nic_drv: RX ring registered: dma=0x47bbb000 size=16
+[    4.403196] minimal_pcie_nic_drv: TX ring registered: dma=0x45eef000 size=16
+[    4.403207] minimal_pcie_nic_drv: BAR0=ffff800080075000 BAR1=ffff80008007d000 IRQ vectors=4
+[    4.409472] minimal_pcie_nic_drv: registered netdev eth1
+```
+
+## ping test
+
+* Configure the ip address
+
+```bash
+# Guest: setup the ip address of eth1 interface
+ifconfig eth1 192.168.10.5 up
+
+# From host
+ifconfig tap1 192.168.10.2 up
+ping 192.168.10.5
+```
+
+* Verify the packet flow using ping and check the dmesg logs for the packet flow.
+
+```bash
+# From host (tap1 interface)
+ping 192.168.10.5
+PING 192.168.10.5 (192.168.10.5) 56(84) bytes of data.
+64 bytes from 192.168.10.5: icmp_seq=1 ttl=64 time=4.05 ms
+64 bytes from 192.168.10.5: icmp_seq=2 ttl=64 time=0.508 ms
+64 bytes from 192.168.10.5: icmp_seq=3 ttl=64 time=0.339 ms
+64 bytes from 192.168.10.5: icmp_seq=4 ttl=64 time=0.396 ms
+64 bytes from 192.168.10.5: icmp_seq=5 ttl=64 time=0.381 ms
+64 bytes from 192.168.10.5: icmp_seq=6 ttl=64 time=0.444 ms
+64 bytes from 192.168.10.5: icmp_seq=7 ttl=64 time=0.346 ms
+^C
+--- 192.168.10.5 ping statistics ---
+7 packets transmitted, 7 received, 0% packet loss, time 6126ms
+rtt min/avg/max/mdev = 0.339/0.923/4.049/1.277 ms
+
+# Logs from guest (minimal-pcie-nic driver)
+ifconfig
+eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 192.168.10.5  netmask 255.255.255.0  broadcast 192.168.10.255
+        inet6 fe80::cf4:50ff:fecb:4bb  prefixlen 64  scopeid 0x20<link>
+        ether 0e:f4:50:cb:04:bb  txqueuelen 1000  (Ethernet)
+        RX packets 14  bytes 1510 (1.4 KiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 44  bytes 5434 (5.3 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+```
+Here we can see tx and rx packets counts are increasing.
+
+* Enable the debug prints during compilation to see the debug messages.
+
+```bash
+root@playground-arm64:~# minimal_pcie_nic: [TRACE] receive_packet size=98 rx_ring_base=0x47bbb000 rx_ring_size=16 rx_head=13
+minimal_pcie_nic: [TRACE] desc[13] addr=0x45eec000 len=2048 flags=0x0
+minimal_pcie_nic: [TRACE] DMA write 98 bytes → guest buf 0x45eec000
+minimal_pcie_nic: [TRACE] desc marked RX_DONE, rx_head now 14, firing IRQ
+minimal_pcie_nic: [TRACE] MSI-X notify vector=0
+minimal_pcie_nic: [TRACE] RX complete — 98 bytes delivered
+```
+
+## 📝 tx-rx-data cat /proc/interrupts
+
+```bash
+ 41:         13          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
+ 42:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
+ 43:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
+ 44:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
+```
+
+![tx-rx-setup](Images/tx-rx-setup.png)
+
+![TXRX](Images/tx-rx-flow.png)
+
 
 ## 🧑‍💻 Author
 **Abhishek Ojha**
