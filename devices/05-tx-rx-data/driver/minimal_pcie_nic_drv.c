@@ -79,8 +79,8 @@ struct minimal_dev {
     struct tx_desc *tx_ring;    // Virtual address of TX descriptor ring
     dma_addr_t tx_ring_dma;     // Physical address QEMU NIC uses to access TX ring
 
-    void *tx_bufs[TX_RING_SIZE];      // TX packet buffers
-    dma_addr_t tx_bufs_dma[TX_RING_SIZE];
+    dma_addr_t tx_bufs_dma[TX_RING_SIZE];   // DMA addresses mapped via dma_map_single
+    struct sk_buff *tx_skbs[TX_RING_SIZE];  // SKBs waiting for TX_DONE before free
     u32 tx_head;                // SW copy: next descriptor to reclaim after TX_DONE
     u32 tx_tail;                // SW copy: next slot to fill
 };
@@ -105,7 +105,31 @@ static netdev_tx_t minimal_start_xmit(struct sk_buff *skb,
                                       struct net_device *ndev)
 {
     struct minimal_dev *mdev = netdev_priv(ndev);
-    u32 slot = mdev->tx_tail;
+    struct pci_dev *pdev = mdev->pdev;
+    struct tx_desc *desc;
+    dma_addr_t dma;
+    u32 slot;
+
+    /* Reclaim any slots the device has finished transmitting. */
+    while (mdev->tx_head != mdev->tx_tail) {
+        struct tx_desc *hdesc = &mdev->tx_ring[mdev->tx_head];
+
+        if (!(hdesc->flags & TX_DONE))
+            break;
+
+        dma_unmap_single(&pdev->dev, mdev->tx_bufs_dma[mdev->tx_head],
+                         hdesc->len, DMA_TO_DEVICE);
+        dev_kfree_skb(mdev->tx_skbs[mdev->tx_head]);
+        mdev->tx_skbs[mdev->tx_head] = NULL;
+        hdesc->flags = 0;
+        mdev->tx_head = (mdev->tx_head + 1) % TX_RING_SIZE;
+    }
+
+    /* Stop the queue if the ring is full (one slot kept as sentinel). */
+    if ((mdev->tx_tail + 1) % TX_RING_SIZE == mdev->tx_head) {
+        netif_stop_queue(ndev);
+        return NETDEV_TX_BUSY;
+    }
 
     if (skb->len > TX_BUF_SIZE) {
         dev_kfree_skb(skb);
@@ -113,13 +137,22 @@ static netdev_tx_t minimal_start_xmit(struct sk_buff *skb,
         return NETDEV_TX_OK;
     }
 
-    /* Copy payload into the pre-allocated DMA-coherent buffer for this slot. */
-    memcpy(mdev->tx_bufs[slot], skb->data, skb->len);
+    /* Map the skb data directly — no copy needed. */
+    dma = dma_map_single(&pdev->dev, skb->data, skb->len, DMA_TO_DEVICE);
+    if (dma_mapping_error(&pdev->dev, dma)) {
+        dev_kfree_skb(skb);
+        ndev->stats.tx_dropped++;
+        return NETDEV_TX_OK;
+    }
 
-    /* Fill the TX descriptor — addr and len are already cached from probe. */
-    mdev->tx_ring[slot].addr  = mdev->tx_bufs_dma[slot];
-    mdev->tx_ring[slot].len   = skb->len;
-    mdev->tx_ring[slot].flags = TX_READY;
+    slot = mdev->tx_tail;
+    mdev->tx_skbs[slot]    = skb;   /* held until TX_DONE reclaim */
+    mdev->tx_bufs_dma[slot] = dma;
+
+    desc        = &mdev->tx_ring[slot];
+    desc->addr  = dma;
+    desc->len   = skb->len;
+    desc->flags = TX_READY;
 
     /* Advance the SW tail and kick the device by writing the new index. */
     mdev->tx_tail = (mdev->tx_tail + 1) % TX_RING_SIZE;
@@ -128,7 +161,6 @@ static netdev_tx_t minimal_start_xmit(struct sk_buff *skb,
     ndev->stats.tx_packets++;
     ndev->stats.tx_bytes += skb->len;
 
-    dev_kfree_skb(skb);
     return NETDEV_TX_OK;
 }
 
@@ -386,17 +418,11 @@ static int minimal_probe(struct pci_dev *pdev,
     }
 
     for (i = 0; i < TX_RING_SIZE; i++) {
-        mdev->tx_bufs[i] = dma_alloc_coherent(&pdev->dev,
-                TX_BUF_SIZE,
-                &mdev->tx_bufs_dma[i],
-                GFP_KERNEL);
-        if (!mdev->tx_bufs[i]) {
-            ret = -ENOMEM;
-            goto err_dma;
-        }
-        mdev->tx_ring[i].addr  = mdev->tx_bufs_dma[i];
+        mdev->tx_ring[i].addr  = 0;
         mdev->tx_ring[i].len   = 0;
         mdev->tx_ring[i].flags = 0;
+        mdev->tx_skbs[i]       = NULL;
+        mdev->tx_bufs_dma[i]   = 0;
     }
 
     mdev->tx_head = 0;
@@ -423,11 +449,6 @@ static int minimal_probe(struct pci_dev *pdev,
 
 err_dma:
     netif_napi_del(&mdev->napi);
-    for (i = 0; i < TX_RING_SIZE; i++) {
-        if (mdev->tx_bufs[i])
-            dma_free_coherent(&pdev->dev, TX_BUF_SIZE,
-                              mdev->tx_bufs[i], mdev->tx_bufs_dma[i]);
-    }
     if (mdev->tx_ring)
         dma_free_coherent(&pdev->dev,
                           sizeof(struct tx_desc) * TX_RING_SIZE,
@@ -472,10 +493,12 @@ static void minimal_remove(struct pci_dev *pdev)
     pr_info(DRV_NAME ": remove\n");
 
     for (i = 0; i < TX_RING_SIZE; i++) {
-        if (mdev->tx_bufs[i])
-            dma_free_coherent(&pdev->dev, TX_BUF_SIZE,
-                              mdev->tx_bufs[i],
-                              mdev->tx_bufs_dma[i]);
+        if (mdev->tx_skbs[i]) {
+            dma_unmap_single(&pdev->dev, mdev->tx_bufs_dma[i],
+                             mdev->tx_ring[i].len, DMA_TO_DEVICE);
+            dev_kfree_skb(mdev->tx_skbs[i]);
+            mdev->tx_skbs[i] = NULL;
+        }
     }
     if (mdev->tx_ring)
         dma_free_coherent(&pdev->dev,

@@ -285,16 +285,20 @@ static void minimal_tx_kick(MinimalPCIeNICState *s)
         struct tx_desc desc;
         uint64_t desc_addr = s->tx_ring_base + s->tx_head * sizeof(desc);
 
+        // Get the TX descriptor from the guest memory
         pci_dma_read(&s->parent_obj, desc_addr, &desc, sizeof(desc));
 
         if (!(desc.flags & TX_READY))
             break;  /* descriptor not filled yet — stop */
 
+        // Get the packet from the guest memory
         uint16_t len = desc.len < sizeof(pktbuf) ? desc.len : sizeof(pktbuf);
         pci_dma_read(&s->parent_obj, desc.addr, pktbuf, len);
 
+        // Send the packet to the host network backend
         qemu_send_packet(qemu_get_queue(s->nic), pktbuf, len);
 
+        // Mark the descriptor as done
         desc.flags = TX_DONE;
         pci_dma_write(&s->parent_obj, desc_addr, &desc, sizeof(desc));
 
@@ -731,7 +735,9 @@ static ssize_t minimal_receive_packet(NetClientState *nc,
     pci_dma_write(&s->parent_obj,
                   desc_addr, &desc, sizeof(desc));
 
-    /* Step 6: Advance the ring head (wrap around at rx_ring_size). */
+    /* Step 6: Advance the ring head (wrap around at rx_ring_size). 
+       Example: if rx_head is 3 and rx_ring_size is 4, then (3+1)%4 = 0.
+       Now the next descriptor is at index 0.  */
     s->rx_head = (s->rx_head + 1) % s->rx_ring_size;
 
     printf("minimal_pcie_nic: [TRACE] desc marked RX_DONE, rx_head now %u, firing IRQ\n",
