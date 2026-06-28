@@ -48,8 +48,11 @@
     -   [📝 tx-rx-data dmesg output](#📝-tx-rx-data-dmesg-output)
     -   [🔍 ping test](#ping-test)
 
-This repository provides a complete learning path for creating **basic to advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
-It is structured so you can explore progressively—from simplest PCI BAR examples to full-featured MSI/MSI-X, DMA engines, and custom capabilities.
+This repository provides a complete learning path for creating **basic to
+advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
+It is structured so you can explore progressively—from simplest PCI BAR
+examples to full-featured MSI/MSI-X, DMA engines, and custom
+capabilities.
 
 ## 📁 Repository Structure
 
@@ -241,8 +244,8 @@ root@playground-arm64:~#
 ```
 
 
-> All the minimal_pcie_nic: prints are from the read write callbacks. Check source
-> code for more details. 
+> All the minimal_pcie_nic: prints are from the read write callbacks.
+> Check source code for more details.
 
 # 🔰 03-msi-x Demo
 
@@ -250,7 +253,8 @@ root@playground-arm64:~#
 
 ![MSI Write Tlp Diagram](Images/msi-write-tlp.png)
 
-* Devices generate interrupts by writing a specific data value to a pre-defined memory address.
+* Devices generate interrupts by writing a specific data value to a pre-defined
+  memory address.
 * Each device can have multiple MSI vectors (up to 32 for MSI, 2048 for MSI-X).
 * Each interrupt vector is assigned a unique message address and data value.
 * No IRQ sharing is needed, which improves performance and simplifies debugging.
@@ -314,17 +318,19 @@ for (i = 0; i < mdev->nvec_irq; i++) {
         Kernel modules: minimal_pcie_nic_drv
 ```
 
-*   **[40]**: Offset 0x40 in PCI configuration space where the MSI capability structure begins.
+*   **[40]**: Offset 0x40 in PCI configuration space where the MSI capability
+    structure begins.
 *   **Enable+**: MSI is active, replacing legacy INTx interrupts.
 *   **Count=4/4**: The device requested 4 vectors, and the OS granted all 4.
 *   **Maskable-**: Per-vector masking is not supported by this hardware.
 *   **64bit-**: The device uses 32-bit MSI addressing.
-*   **Address/Data**: The memory-write parameters (Address `08020040`, Data `0060`) used to trigger the interrupt.
+*   **Address/Data**: The memory-write parameters (Address `08020040`, Data `0060`)
+    used to trigger the interrupt.
 *   All vectors (if multiple allowed) share the same MSI address.
 *   The data value is what tells the CPU/APIC which vector is being triggered.
 *   QEMU uses nr_vectors to encode data for each vector.
 
-so in MSI:
+So in MSI:
 
 ```bash
 Address: 0x08020040   (same for all vectors)
@@ -410,12 +416,14 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
  41:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
  ```
 
-Similarly we can generate interrupt for other vectors (2 and 3) by writing 0x00000002 and 0x00000003 to BAR0.
+Similarly we can generate interrupt for other vectors (2 and 3) by writing
+0x00000002 and 0x00000003 to BAR0.
 
 
 ## Understand MSI-X
 
-MSI-X requires an additional BAR to store the MSI-X table and Pending Bit Array (PBA).
+MSI-X requires an additional BAR to store the MSI-X table and Pending Bit Array
+(PBA).
 
 ```text
 +-----------------------+ 0x10043000 (BAR0)
@@ -575,11 +583,17 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
  41:    0     0     0     0  GICv2m-PCI-MSIX-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
  ```
 
-Similarly we can generate interrupt for other vectors (2 and 3) by writing 0x00000002 and 0x00000003 to BAR0.
+Similarly we can generate interrupt for other vectors (2 and 3) by writing
+0x00000002 and 0x00000003 to BAR0.
 
 # 🔰 04-rx-data Demo
-This section will cover the rx data path implementatioon only for testing the packet flow from host tap1 to minimal-pcie-nic device driver. We are using ring descriptor based rx data path. the dma address information of the ring descriptor is written to BAR0 register and that is used by qemu to process the rx data path. This implementation is using dma for data transfer.
-Implementation is only for testing the rx data path and will be extended to support tx data path in future with optimization.
+This section will cover the rx data path implementatioon only for testing the
+packet flow from host tap1 to minimal-pcie-nic device driver. We are using ring
+descriptor based rx data path. the dma address information of the ring
+descriptor is written to BAR0 register and that is used by qemu to process the
+rx data path. This implementation is using dma for data transfer.
+Implementation is only for testing the rx data path and will be extended to
+support tx data path in future with optimization.
 
 ![Call Flow](Images/rx-packet.png)
 
@@ -590,7 +604,8 @@ host → QEMU user-net → minimal-pcie-nic → RX DMA → MSI-X → driver
 ```
 
 ## 🔍 rx-data setup QEMU networking
-To test the rx data path, we need to bringup the minimal-pcie-nic as network device and connect it to backend tap1 interface.
+To test the rx data path, we need to bringup the minimal-pcie-nic as network
+device and connect it to backend tap1 interface.
 
 * *Step 1:* Create tap interface on host.
 ```bash
@@ -626,7 +641,8 @@ minimal_pcie_nic_drv: PCI enable device
 minimal_pcie_nic_drv: BAR0=00000000466bc38b BAR1=00000000f74bb2a9 IRQ Vector Number=4
 ```
 
-* *Step 3:* Now bringup the tap1 interface and the ip address and run ping command from tap1 interface.
+* *Step 3:* Now bringup the tap1 interface and the ip address and run ping
+  command from tap1 interface.
 
 ```bash
 ip link set tap1 up
@@ -636,7 +652,8 @@ ping 192.168.1.100 -I tap1
 
 ## 🔍 rx-data logs
 
-After executing the ping command, we can see the rx data path is working. We are just printing the length of the received packet in the driver irq handler.
+After executing the ping command, we can see the rx data path is working. We are
+just printing the length of the received packet in the driver irq handler.
 
 ```logs
 minimal_pcie_nic_drv: RX packet len=90
@@ -676,7 +693,8 @@ root@playground-arm64:~#
 
 ## 📝 rx-data cat /proc/interrupts
 
-we are using msi-x vector 1 for rx data path. qemu device generates the interrupt for each received packet.
+we are using msi-x vector 1 for rx data path. qemu device generates the
+interrupt for each received packet.
 
 ```bash
 root@playground-arm64:~# cat /proc/interrupts
@@ -687,7 +705,12 @@ root@playground-arm64:~# cat /proc/interrupts
 ```
 
 # 05-tx-rx-data-demo
-This section will cover the tx and rx data path implementation for testing the packet flow from minimal-pcie-nic device driver to host tap1 interface. We are using ring descriptor based tx and rx data path. the dma address information of the ring descriptor is written to BAR0 register and that is used by qemu to process the tx and rx data path. This implementation is using dma for data transfer.
+This section will cover the tx and rx data path implementation for testing the
+packet flow from minimal-pcie-nic device driver to host tap1 interface. We are
+using ring descriptor based tx and rx data path. the dma address information of
+the ring descriptor is written to BAR0 register and that is used by qemu to
+process the tx and rx data path. This implementation is using dma for data
+transfer.
 
 ![Descriptor Mapping](Images/descriptor.png)
 
@@ -794,6 +817,8 @@ minimal_pcie_nic: [TRACE] RX complete — 98 bytes delivered
 ![tx-rx-setup](Images/tx-rx-setup.png)
 
 ![TXRX](Images/tx-rx-flow.png)
+
+![Big Picture](Images/minimal-pcie-nic-card-big-picture.png)
 
 
 ## 🧑‍💻 Author
