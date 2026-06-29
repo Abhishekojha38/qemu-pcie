@@ -70,7 +70,12 @@ capabilities.
 │   │   │   └── minimal_pcie_nic_drv.c
 │   │   └── qemu
 │   │       └── msix-pcie-nic.c
-│   └── 04-rx-data
+│   ├── 04-rx-data
+│   │   ├── driver
+│   │   │   └── minimal_pcie_nic_drv.c
+│   │   └── qemu
+│   │       └── msix-pcie-nic.c
+│   └── 05-tx-rx-data
 │       ├── driver
 │       │   └── minimal_pcie_nic_drv.c
 │       └── qemu
@@ -88,6 +93,8 @@ capabilities.
 ✔️ PCIe Configuration Space\
 ✔️ MSI / MSI-X Interrupts\
 ✔️ Rx Data Path with Emulated DMA Engine
+✔️ Tx Data Path with Emulated DMA Engine
+✔️ DMA Ring Descriptor Based Data Transfer
 
 ## ⚙️ What Happens When You Run QEMU
 
