@@ -426,6 +426,8 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
 Similarly we can generate interrupt for other vectors (2 and 3) by writing
 0x00000002 and 0x00000003 to BAR0.
 
+![MSI](Images/msi-int.png)
+
 
 ## Understand MSI-X
 
