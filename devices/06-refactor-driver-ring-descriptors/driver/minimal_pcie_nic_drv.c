@@ -419,19 +419,28 @@ static int minimal_napi_poll(struct napi_struct *napi, int budget)
     struct minimal_dev *mdev = container_of(napi, struct minimal_dev, napi);
     struct rx_ring *rx = &mdev->rx_ring;
     struct rx_desc *descs = rx->desc;
-    u32 head = readl(mdev->bar0 + REG_RX_HEAD);
     u32 i    = rx->tail;
     int work_done = 0;
 
-    rx->head = head;
+    /* REG_RX_HEAD is informational only.  It must NOT be used as the loop's
+     * emptiness test: when the ring is completely full the device wraps its
+     * head index back around to the tail, so head == tail is ambiguous
+     * (full vs empty).  The old "while (i != head)" mistook a full ring for
+     * an empty one and stalled the RX path forever (TCP cwnd collapsed and
+     * never recovered).  The RX_DONE flag is the authoritative per-descriptor
+     * "buffer filled" signal, so drain on that instead. */
+    rx->head = readl(mdev->bar0 + REG_RX_HEAD);
 
-    while (i != head && work_done < budget) {
+    while (work_done < budget) {
         struct rx_desc *desc = &descs[i];
 
-        if (!(desc->flags & RX_DONE)) {
-            pr_err(DRV_NAME ": [TRACE]   desc[%u] not done yet — stop\n", i);
+        if (!(desc->flags & RX_DONE))
             break;
-        }
+
+        /* Order the payload/len reads after observing RX_DONE: the device
+         * DMAs the packet before setting the flag, so we must not read the
+         * buffer until we've seen the flag. */
+        dma_rmb();
 
         u16 len = desc->len;
         struct sk_buff *skb = netdev_alloc_skb_ip_align(mdev->netdev, len);
@@ -446,8 +455,11 @@ static int minimal_napi_poll(struct napi_struct *napi, int budget)
             mdev->netdev->stats.rx_dropped++;
         }
 
-        /* Re-arm: clear the done flag and restore the full buffer length. */
+        /* Re-arm: clear the done flag and restore the full buffer length.
+         * Ensure the buffer/len stores are visible before the device can see
+         * the cleared flag and reuse the slot. */
         desc->len   = RX_BUF_SIZE;
+        dma_wmb();
         desc->flags = 0;
 
         i = (i + 1) % rx->count;
