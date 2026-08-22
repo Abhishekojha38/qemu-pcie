@@ -33,7 +33,7 @@
     -   [🔍 MSI-X lspci output](#🔍-msi-x-lspci-output)
     -   [📝 MSI-X dmesg output](#📝-msi-x-dmesg-output)
     -   [📝 MSI-X cat /proc/interrupts](#📝-msi-x-cat-proc-interrupts)
-    -   [To simulate the generation is msi-x interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-x-interrupt-for-each-vector-we-can-follow-this-sequence-1)
+    -   [To simulate the generation is msi-x interrupt for each vector, we can follow this sequence:](#to-simulate-the-generation-is-msi-x-interrupt-for-each-vector-we-can-follow-this-sequence)
 -   [🔰 04-rx-data Demo](#🔰-04-rx-data-demo)
     -   [🔍 rx-data flow](#🔍-rx-data-flow)
     -   [🔍 rx-data setup QEMU networking](#🔍-rx-data-setup-qemu-networking)
@@ -47,6 +47,9 @@
     -   [🔍 tx-rx-data lspci output](#🔍-tx-rx-data-lspci-output)
     -   [📝 tx-rx-data dmesg output](#📝-tx-rx-data-dmesg-output)
     -   [🔍 ping test](#ping-test)
+-   [🔰 06-refactor-driver-ring-descriptors Demo](#🔰-06-refactor-driver-ring-descriptors-demo)
+    -   [🧱 Ring Descriptor Refactor](#🧱-ring-descriptor-refactor)
+    -   [🐛 Fix: Permanent RX Stall When the Ring Fills Up](#🐛-fix-permanent-rx-stall-when-the-ring-fills-up)
 
 This repository provides a complete learning path for creating **basic to
 advanced PCIe devices in QEMU**, along with corresponding **Linux drivers**.  
@@ -75,11 +78,16 @@ capabilities.
 │   │   │   └── minimal_pcie_nic_drv.c
 │   │   └── qemu
 │   │       └── msix-pcie-nic.c
-│   └── 05-tx-rx-data
+│   ├── 05-tx-rx-data
+│   │   ├── driver
+│   │   │   └── minimal_pcie_nic_drv.c
+│   │   └── qemu
+│   │       └── msix-pcie-nic.c
+│   └── 06-refactor-driver-ring-descriptors
 │       ├── driver
 │       │   └── minimal_pcie_nic_drv.c
 │       └── qemu
-│           └── msix-pcie-nic.c
+│           └── pcie-nic.c
 ├── Images
 ├── LICENSE
 └── README.md
@@ -87,14 +95,16 @@ capabilities.
 
 ## 🧰 Features Covered
 
-✔️ Basic PCIe Device Creation\
-✔️ Visible Entry in `lspci`\
-✔️ BARs & MMIO\
-✔️ PCIe Configuration Space\
-✔️ MSI / MSI-X Interrupts\
-✔️ Rx Data Path with Emulated DMA Engine
-✔️ Tx Data Path with Emulated DMA Engine
-✔️ DMA Ring Descriptor Based Data Transfer
+-   ✔️ Basic PCIe Device Creation
+-   ✔️ Visible Entry in `lspci`
+-   ✔️ BARs & MMIO
+-   ✔️ PCIe Configuration Space
+-   ✔️ MSI / MSI-X Interrupts
+-   ✔️ Rx Data Path with Emulated DMA Engine
+-   ✔️ Tx Data Path with Emulated DMA Engine
+-   ✔️ DMA Ring Descriptor Based Data Transfer
+-   ✔️ Refactored TX/RX Ring Descriptor Structures (buffer/descriptor/ring split)
+-   ✔️ RX Backpressure Handling — Recovery from a Full Ring Without Stalling
 
 ## ⚙️ What Happens When You Run QEMU
 
@@ -112,10 +122,10 @@ https://github.com/Abhishekojha38/yocto-playground/blob/main/README.md
 
 ## 2️⃣ Modify QEMU to add PCIe device
 
-``` bash
+```bash
 devtool modify qemu-system-native
 cd ~/yocto-playground/build/workspace/sources/qemu-system-native
-cp ~/qemu-pcie/device/01-basic/qemu/minimal_pcie_nic.c hw/pci/minimal_pcie_nic.c
+cp ~/qemu-pcie/devices/01-basic/qemu/minimal_pcie_nic.c hw/pci/minimal_pcie_nic.c
 ```
 
 ## 3️⃣ Add Kconfig entry
@@ -135,26 +145,26 @@ cp ~/qemu-pcie/device/01-basic/qemu/minimal_pcie_nic.c hw/pci/minimal_pcie_nic.c
 
 ## 5️⃣ Commit changes
 
-``` bash
+```bash
 git add hw/pci/meson.build hw/pci/kconfig hw/pci/minimal_pcie_nic.c
 git commit -m "Add minimal pcie nic card"
 ```
 
 ## 6️⃣ Finish devtool modifications
 
-``` bash
+```bash
 devtool finish qemu-system-native ../sources/meta-playground/meta-playground-os/
 ```
 
 ## 7️⃣ Build final image
 
-``` bash
+```bash
 cqfd run
 ```
 
 ## ▶️ Launch QEMU
 
-``` bash
+```bash
 runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 ```
 
@@ -164,7 +174,7 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 
 ## 🔍 Basic lspci output
 
-``` bash
+```bash
 00:05.0 Ethernet controller: Device 1234:11e8
         Subsystem: Red Hat, Inc. Device 1100
         Flags: fast devsel
@@ -178,7 +188,7 @@ runqemu playground-arm64 nographic slirp qemuparams="-device minimal-pcie-nic"
 
 ## 📝 Basic dmesg output
 
-``` bash
+```bash
 pci 0000:00:05.0: [1234:11e8] type 00 class 0x020000
 ```
 
@@ -186,15 +196,15 @@ pci 0000:00:05.0: [1234:11e8] type 00 class 0x020000
 
 A PCIe device announces its MMIO requirements in BAR0–BAR5.
 Meaning:
-* BAR0 Size: `4 KB`
-* Host Physical Address: `0x10043000`
-* Type: MMIO, non-prefetchable (normal for NIC registers)
+- BAR0 Size: `4 KB`
+- Host Physical Address: `0x10043000`
+- Type: MMIO, non-prefetchable (normal for NIC registers)
 
 ![MMIO](Images/pci-mmio.png)
 
 ## 🔍 MMIO lspci output
 
-``` bash
+```bash
 00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1
         Subsystem: Red Hat, Inc. Device 1100
         Control: I/O- Mem+ BusMaster- SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx-
@@ -210,14 +220,14 @@ Meaning:
 
 ## 📝 MMIO dmesg output
 
-``` bash
-pci 0000:00:05.0: BAR 0 [mem 0x10043000-0x10043fff]: assigned    
+```bash
+pci 0000:00:05.0: BAR 0 [mem 0x10043000-0x10043fff]: assigned
 pci 0000:00:05.0: [1af4:10f1] type 00 class 0x020000 conventional PCI endpoint
 ```
 
 ## 🔢 Memory Read/Write
 
-* First read `0x1004300` location
+- First read `0x1004300` location
 
 ```bash
 root@playground-arm64:~# devmem2 0x10043000
@@ -227,7 +237,7 @@ minimal_pcie_nic: MMIO read addr=0x0 size=4 val=0x0
 Read at address  0x10043000 (0xffffb861c000): 0x00000000
 ```
 
-* Now Write some value to it `deafbeaf`
+- Now Write some value to it `deafbeaf`
 
 ```bash
 root@playground-arm64:~# devmem2 0x10043000 w 0xdeafbeaf
@@ -239,7 +249,7 @@ minimal_pcie_nic: MMIO write addr=0x0 size=4 data=0xdeafbeaf
 Write at address 0x10043000 (0xffffb04c0000): 0xDEAFBEAF, readback 0xDEAFBEAF
 ```
 
-* Readback the same location `0x10043000`
+- Readback the same location `0x10043000`
 
 ```bash
 root@playground-arm64:~# devmem2 0x10043000
@@ -260,11 +270,11 @@ root@playground-arm64:~#
 
 ![MSI Write Tlp Diagram](Images/msi-write-tlp.png)
 
-* Devices generate interrupts by writing a specific data value to a pre-defined
+- Devices generate interrupts by writing a specific data value to a pre-defined
   memory address.
-* Each device can have multiple MSI vectors (up to 32 for MSI, 2048 for MSI-X).
-* Each interrupt vector is assigned a unique message address and data value.
-* No IRQ sharing is needed, which improves performance and simplifies debugging.
+- Each device can have multiple MSI vectors (up to 32 for MSI, 2048 for MSI-X).
+- Each interrupt vector is assigned a unique message address and data value.
+- No IRQ sharing is needed, which improves performance and simplifies debugging.
 
 ## How to use MSI for QEMU device
 
@@ -325,17 +335,17 @@ for (i = 0; i < mdev->nvec_irq; i++) {
         Kernel modules: minimal_pcie_nic_drv
 ```
 
-*   **[40]**: Offset 0x40 in PCI configuration space where the MSI capability
+-   **[40]**: Offset 0x40 in PCI configuration space where the MSI capability
     structure begins.
-*   **Enable+**: MSI is active, replacing legacy INTx interrupts.
-*   **Count=4/4**: The device requested 4 vectors, and the OS granted all 4.
-*   **Maskable-**: Per-vector masking is not supported by this hardware.
-*   **64bit-**: The device uses 32-bit MSI addressing.
-*   **Address/Data**: The memory-write parameters (Address `08020040`, Data `0060`)
+-   **Enable+**: MSI is active, replacing legacy INTx interrupts.
+-   **Count=4/4**: The device requested 4 vectors, and the OS granted all 4.
+-   **Maskable-**: Per-vector masking is not supported by this hardware.
+-   **64bit-**: The device uses 32-bit MSI addressing.
+-   **Address/Data**: The memory-write parameters (Address `08020040`, Data `0060`)
     used to trigger the interrupt.
-*   All vectors (if multiple allowed) share the same MSI address.
-*   The data value is what tells the CPU/APIC which vector is being triggered.
-*   QEMU uses nr_vectors to encode data for each vector.
+-   All vectors (if multiple allowed) share the same MSI address.
+-   The data value is what tells the CPU/APIC which vector is being triggered.
+-   QEMU uses nr_vectors to encode data for each vector.
 
 So in MSI:
 
@@ -363,14 +373,14 @@ msi_notify(pdev, 1); // writes address/data for vector 1 (same address, differen
 
 ## 📝 MSI cat /proc/interrupts
 
-* **38-41** Linux IRQ numbers assigned to the 4 MSI vectors.
-* **GICv2m-PCI-MSI** The interrupt controller (MSI frame) handling the messages.
-* **0-3** Relative vector index within the device.
-* **minimal_pcie_nic_drv** The driver associated with these interrupts.
+- **38-41** Linux IRQ numbers assigned to the 4 MSI vectors.
+- **GICv2m-PCI-MSI** The interrupt controller (MSI frame) handling the messages.
+- **0-3** Relative vector index within the device.
+- **minimal_pcie_nic_drv** The driver associated with these interrupts.
 
 ```bash
-root@playground-arm64:~# cat /proc/interrupts 
-           CPU0       CPU1       CPU2       CPU3       
+root@playground-arm64:~# cat /proc/interrupts
+           CPU0       CPU1       CPU2       CPU3
  38:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
  39:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
  40:          0          0          0          0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
@@ -401,7 +411,7 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000000
 [  470.625269] IRQ 38 fired
 
 # cat /proc/interrupts (vector 0 interrupt is generated on CPU0)
-        CPU0  CPU1  CPU2  CPU3 
+        CPU0  CPU1  CPU2  CPU3
  38:      1     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
  39:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
  40:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
@@ -416,12 +426,12 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
 [  179.056870] IRQ 39 fired
 
 # cat /proc/interrupts (vector 1 interrupt is generated on CPU0)
-        CPU0  CPU1  CPU2  CPU3 
+        CPU0  CPU1  CPU2  CPU3
  38:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
  39:      1     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
  40:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
  41:      0     0     0     0  GICv2m-PCI-MSI-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
- ```
+```
 
 Similarly we can generate interrupt for other vectors (2 and 3) by writing
 0x00000002 and 0x00000003 to BAR0.
@@ -445,10 +455,10 @@ MSI-X requires an additional BAR to store the MSI-X table and Pending Bit Array
 ```
 
 Meaning:
-* BAR0 Size: `4 KB` (Registers)
-* BAR1 Size: `4 KB` (MSI-X Table & PBA)
-* Host Physical Address: `0x10043000` (BAR0), `0x10044000` (BAR1)
-* Type: MMIO, non-prefetchable
+- BAR0 Size: `4 KB` (Registers)
+- BAR1 Size: `4 KB` (MSI-X Table & PBA)
+- Host Physical Address: `0x10043000` (BAR0), `0x10044000` (BAR1)
+- Type: MMIO, non-prefetchable
 
 ## How to use MSI-X for QEMU device
 
@@ -505,7 +515,7 @@ Meaning:
 
 ## 🔍 MSI-X lspci output
 
-``` bash
+```bash
 00:05.0 Ethernet controller: Red Hat, Inc. Device 10f1 (rev 01)
         Subsystem: Red Hat, Inc. Device 1100
         Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx+
@@ -531,7 +541,7 @@ root@playground-arm64:~#
 
 ## 📝 MSI-X dmesg output
 
-``` bash
+```bash
 pci 0000:00:05.0: [1af4:10f1] type 00 class 0x020000 conventional PCI endpoint
 pci 0000:00:05.0: BAR 0 [mem 0x00000000-0x00000fff]
 pci 0000:00:05.0: BAR 1 [mem 0x00000000-0x00000fff]
@@ -543,7 +553,7 @@ minimal_pcie_nic_drv: BAR0=00000000c08f3e51 BAR1=00000000282d1ca9 IRQ Vector Num
 
 ## 📝 MSI-X cat /proc/interrupts
 
-``` bash
+```bash
  38:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   0 Edge      minimal_pcie_nic_drv
  39:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
  40:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
@@ -561,7 +571,7 @@ QEMU device detects write
 QEMU triggers MSI / MSI-X vector N
         ↓
 Linux IRQ handler for vector N runs
-``` 
+```
 ```bash
 # Vector 0
 # Write BAR0 to generate MSI interrupt
@@ -590,7 +600,7 @@ root@playground-arm64:~# devmem2 0x10043000 w 0x00000001
  39:    1     0     0     0  GICv2m-PCI-MSIX-0000:00:05.0   1 Edge      minimal_pcie_nic_drv
  40:    0     0     0     0  GICv2m-PCI-MSIX-0000:00:05.0   2 Edge      minimal_pcie_nic_drv
  41:    0     0     0     0  GICv2m-PCI-MSIX-0000:00:05.0   3 Edge      minimal_pcie_nic_drv
- ```
+```
 
 Similarly we can generate interrupt for other vectors (2 and 3) by writing
 0x00000002 and 0x00000003 to BAR0.
@@ -616,13 +626,13 @@ host → QEMU user-net → minimal-pcie-nic → RX DMA → MSI-X → driver
 To test the rx data path, we need to bringup the minimal-pcie-nic as network
 device and connect it to backend tap1 interface.
 
-* *Step 1:* Create tap interface on host.
+- **Step 1:** Create tap interface on host.
 ```bash
 ip tuntap add tap1 mode tap
 ip link set tap1 up
 ```
 
-* *Step 2:* Run QEMU with minimal-pcie-nic device.
+- **Step 2:** Run QEMU with minimal-pcie-nic device.
 ```bash
 runqemu playground-arm64 nographic qemuparams="-netdev tap,id=net1,ifname=tap1,script=no,downscript=no   -device minimal-pcie-nic,netdev=net1"
 ```
@@ -650,7 +660,7 @@ minimal_pcie_nic_drv: PCI enable device
 minimal_pcie_nic_drv: BAR0=00000000466bc38b BAR1=00000000f74bb2a9 IRQ Vector Number=4
 ```
 
-* *Step 3:* Now bringup the tap1 interface and the ip address and run ping
+- **Step 3:** Now bringup the tap1 interface and the ip address and run ping
   command from tap1 interface.
 
 ```bash
@@ -713,7 +723,7 @@ root@playground-arm64:~# cat /proc/interrupts
 30:          0          0          0          0  GICv2m-PCI-MSIX-0000:00:03.0   3 Edge      minimal_pcie_nic_drv
 ```
 
-# 05-tx-rx-data-demo
+# 🔰 05-tx-rx-data Demo
 This section will cover the tx and rx data path implementation for testing the
 packet flow from minimal-pcie-nic device driver to host tap1 interface. We are
 using ring descriptor based tx and rx data path. the dma address information of
@@ -761,7 +771,7 @@ dmesg |grep minimal
 
 ## ping test
 
-* Configure the ip address
+- Configure the ip address
 
 ```bash
 # Guest: setup the ip address of eth1 interface
@@ -772,7 +782,7 @@ ifconfig tap1 192.168.10.2 up
 ping 192.168.10.5
 ```
 
-* Verify the packet flow using ping and check the dmesg logs for the packet flow.
+- Verify the packet flow using ping and check the dmesg logs for the packet flow.
 
 ```bash
 # From host (tap1 interface)
@@ -803,7 +813,7 @@ eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
 ```
 Here we can see tx and rx packets counts are increasing.
 
-* Enable the debug prints during compilation to see the debug messages.
+- Enable the debug prints during compilation to see the debug messages.
 
 ```bash
 root@playground-arm64:~# minimal_pcie_nic: [TRACE] receive_packet size=98 rx_ring_base=0x47bbb000 rx_ring_size=16 rx_head=13
@@ -830,6 +840,107 @@ minimal_pcie_nic: [TRACE] RX complete — 98 bytes delivered
 ![Big Picture](Images/minimal-pcie-nic-card-big-picture.png)
 
 
+# 🔰 06-refactor-driver-ring-descriptors Demo
+
+This section keeps the same tx/rx data path behavior as `05-tx-rx-data`, but
+reworks the driver and device code around explicit ring-descriptor
+structures and fixes an RX stall bug that showed up under sustained traffic.
+The QEMU device source file is also renamed from `msix-pcie-nic.c` to
+`pcie-nic.c` to reflect that it is no longer MSI-X specific scaffolding.
+
+## 🧱 Ring Descriptor Refactor
+
+The driver's ring bookkeeping was pulled out of ad-hoc fields and into
+dedicated structures:
+
+```c
+struct tx_buff { void *buf; dma_addr_t dma; };   // per-slot TX buffer (virtual + DMA address)
+struct rx_buff { void *buf; dma_addr_t dma; };   // per-slot RX buffer (virtual + DMA address)
+
+struct rx_desc { dma_addr_t addr; u16 len; u16 flags; };  // NIC-visible RX descriptor
+struct tx_desc { dma_addr_t addr; u16 len; u16 flags; };  // NIC-visible TX descriptor
+
+struct rx_ring {
+    void *desc;                 // RX descriptor ring (virtual address)
+    struct rx_buff *rx_bufs;    // per-descriptor buffer bookkeeping
+    unsigned int count;
+    u32 head;                   // next descriptor to reclaim
+    u32 tail;                   // next slot to fill
+};
+
+struct tx_ring {
+    void *desc;                 // TX descriptor ring (virtual address)
+    struct tx_buff *tx_bufs;    // per-descriptor buffer bookkeeping
+    unsigned int count;
+    u32 head;
+    u32 tail;
+};
+```
+
+`struct minimal_dev` now embeds a `struct rx_ring` and `struct tx_ring`
+directly instead of tracking DMA base/size/head/tail as loose fields, and the
+`probe()` function was cleaned up around this layout. The QEMU-side device
+model (`pcie-nic.c`) was likewise stripped of the per-packet `printf` tracing
+that `05-tx-rx-data` used for debugging, keeping only the logs needed to
+diagnose real errors.
+
+## 🐛 Fix: Permanent RX Stall When the Ring Fills Up
+
+Under sustained RX load the driver could stop receiving packets permanently
+until the interface was reset. Root cause: the NAPI poll loop drained the RX
+ring with `while (i != head)`, where `head` was read from the device's
+`REG_RX_HEAD` register. That register is purely informational — when the
+ring fills up completely, the device's head index wraps back around to equal
+the tail, so a **full** ring and an **empty** ring look identical to that
+comparison. The driver read a full ring as "nothing to do" and stopped
+polling it, so it never drained the ring, QEMU never got descriptors back,
+and RX stalled forever (in practice this could be seen as a TCP connection's
+receive window collapsing and never recovering).
+
+The fix drains strictly on the authoritative per-descriptor flag instead:
+
+```c
+// REG_RX_HEAD is informational only and must not be used as the loop's
+// emptiness test — a full ring and an empty ring both report head == tail.
+// RX_DONE is the authoritative per-descriptor signal, so drain on that.
+while (work_done < budget) {
+    struct rx_desc *desc = &descs[i];
+
+    if (!(desc->flags & RX_DONE))
+        break;
+
+    dma_rmb();   /* observe the DMA'd payload only after RX_DONE is seen */
+
+    /* ...allocate an skb and hand the packet to the network stack... */
+
+    desc->len   = RX_BUF_SIZE;
+    dma_wmb();   /* buffer/len visible before the device can reuse the slot */
+    desc->flags = 0;
+
+    i = (i + 1) % rx->count;
+    work_done++;
+}
+```
+
+Two supporting changes went in alongside the driver fix:
+
+-   **QEMU flushes on `REG_RX_TAIL` too.** Previously QEMU only re-flushed
+    queued packets to the NIC backend when the driver wrote the RX ring
+    base/size. Now it also flushes when the driver advances `REG_RX_TAIL`
+    (i.e. frees descriptors), so RX resumes automatically as soon as space
+    opens up instead of waiting for a ring re-init that never comes.
+-   **Rate-limited "ring full" logging.** A saturated ring can trigger the
+    ring-full drop path thousands of times per second; QEMU now logs it only
+    once every 65536 drops (with a running total) instead of once per drop,
+    since unconditional `printf` on every drop flooded the console and
+    blocked the vCPU thread on synchronous stdout.
+
+Build and run steps are identical to
+[🔰 05-tx-rx-data Demo](#🔰-05-tx-rx-data-demo) above — just point the
+`devtool modify` copy step at
+`devices/06-refactor-driver-ring-descriptors/driver/minimal_pcie_nic_drv.c`
+and `devices/06-refactor-driver-ring-descriptors/qemu/pcie-nic.c` instead.
+
 ## 🧑‍💻 Author
 **Abhishek Ojha**
-Abhishekojha38@gmail.com
+abhishekojha38@gmail.com
